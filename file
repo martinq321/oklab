@@ -1,0 +1,370 @@
+(** https://bottosson.github.io/posts/gamutclipping/#oklab-to-linear-srgb-conversion **)
+Lab[l_,a_,b_]:=Lab[<|"L"->l,"a"->a,"b"->b|>]
+Lab[asoc_Association][s_String]:=asoc[s]
+
+RGB[r_,g_,b_]:=RGB[<|"r"->r,"g"->g,"b"->b|>]
+RGB[asoc_Association][s_String]:=asoc[s]
+RGB/:ToColor[RGB[asoc_Association]]:=RGBColor[asoc["r"],asoc["g"],asoc["b"]]
+
+linearsRGBtoOKLAB[c_RGB]:=Module[{l,m,s},
+    l=0.4122214708 * c["r"] + 0.5363325363 * c["g"] + 0.0514459929 * c["b"];
+    m=0.2119034982  * c["r"] + 0.6806995451  * c["g"] + 0.1073969566 * c["b"];
+    s=0.0883024619 * c["r"] + 0.2817188376 * c["g"] + 0.6299787005 * c["b"];
+    
+    l=l^(1/3);
+    m=m^(1/3);
+    s=s^(1/3);
+    Lab[
+        0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
+        1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
+        0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s
+    ]
+]
+
+OKLABtolinearsRGB[c_Lab]:=Module[{l,m,s},
+    l = c["L"] + 0.3963377774 * c["a"] + 0.2158037573 * c["b"];
+    m = c["L"] - 0.1055613458 * c["a"] - 0.0638541728 * c["b"];
+    s = c["L"] - 0.0894841775 * c["a"] - 1.2914855480 * c["b"];
+    
+    l=l^3;
+    m=m^3;
+    s=s^3;
+    
+    RGB[
+         +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+        -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+        -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s
+    ]
+]
+
+(** https://bottosson.github.io/posts/gamutclipping/#intersection-with-srgb-gamut **)
+
+(*Finds the maximum saturation possible for a given hue that fits in sRGB
+Saturation here is defined as S = C/L
+a and b must be normalized so a^2 + b^2 == 1*)
+computeMaxSaturation[a_,b_]:=Module[{k0, k1, k2, k3, k4, wl, wm, ws},
+    If[-1.88170328 * a - 0.80936493 * b > 1,
+        (* Red component *)
+        k0 = +1.19086277; k1 = +1.76576728; k2 = +0.59662641; k3 = +0.75515197; k4 = +0.56771245;
+        wl = +4.0767416621; wm = -3.3077115913; ws = +0.2309699292;,
+    (*else*) If[1.81444104 * a - 1.19445276 * b > 1,
+        (* Green component *)
+        k0 = +0.73956515; k1 = -0.45954404; k2 = +0.08285427; k3 = +0.12541070; k4 = +0.14503204;
+        wl = -1.2684380046; wm = +2.6097574011; ws = -0.3413193965;,
+    (*else*) 
+        (* Blue component *)
+        k0 = +1.35733652; k1 = -0.00915799; k2 = -1.15130210; k3 = -0.50559606; k4 = +0.00692167;
+        wl = -0.0041960863; wm = -0.7034186147; ws = +1.7076147010;
+    ]];
+    
+    Block[{S,kl,km,ks,l,m,s,ldS,mdS,sdS,ldS2,mdS2,sdS2,f,f1,f2},
+        (*Approximate max saturation using a polynomial:*)
+        S = k0 + k1 * a + k2 * b + k3 * a * a + k4 * a * b;
+        (*Do one step Halley's method to get closer
+        this gives an error less than 10e6, except for some blue hues where the dS/dh is close to infinite
+        this should be sufficient for most applications, otherwise do two/three steps*) 
+        kl = +0.3963377774 * a + 0.2158037573 * b;
+        km = -0.1055613458 * a - 0.0638541728 * b;
+        ks = -0.0894841775 * a - 1.2914855480 * b;
+        
+        l=(1. + S * kl);
+        m=(1. + S * km);
+        s=(1. + S * ks);
+        
+        ldS = 3. * kl * l * l;
+        mdS = 3. * km * m * m;
+        sdS = 3. * ks * s * s;
+        
+        ldS2 = 6. * kl * kl * l;
+        mdS2 = 6. * km * km * m;
+        sdS2 = 6. * ks * ks * s;
+
+        l=l^3;
+        m=m^3;
+        s=s^3;
+        
+        f  = wl * l     + wm * m     + ws * s;
+        f1 = wl * ldS  + wm * mdS  + ws * sdS;
+        f2 = wl * ldS2 + wm * mdS2 + ws * sdS2;
+        S = S - f * f1 / (f1*f1 - 0.5 * f * f2);
+        
+        Return[S]
+    ]   
+]
+
+LC[l_,c_]:=LC[<|"L"->l,"C"->c|>]
+LC[asoc_Association][s_String]:=asoc[s]
+(*finds L_cusp and C_cusp for a given hue
+a and b must be normalized so a^2 + b^2 == 1*)
+findCusp[a_,b_]:=Module[{Scusp,RGBatMax,Lcusp,Ccusp},
+    (*First, find the maximum saturation (saturation S = C/L)*)
+    Scusp=computeMaxSaturation[a,b];
+    (*Convert to linear sRGB to find the first point where at least one of r,g or b >= 1:*)
+    RGBatMax=OKLABtolinearsRGB[Lab[1,Scusp*a,Scusp*b]];
+    Lcusp=(1./Max[RGBatMax["r"],RGBatMax["g"],RGBatMax["b"]])^(1/3);
+    Ccusp=Lcusp*Scusp;
+    LC[Lcusp,Ccusp]
+]
+
+(* Finds intersection of the line defined by 
+L = L0 * (1 - t) + t * L1;
+C = t * C1;
+a and b must be normalized so a^2 + b^2 == 1*)
+findGamutIntersection[a_,b_,L1_,C1_,L0_,LCcusp_LC]:=Module[{t},
+    (*Find the intersection for upper and lower half seprately*)
+    If[(((L1 - L0) * LCcusp["C"] - (LCcusp["L"] - L0) * C1) <= 0.),
+        (*Lower half*)
+        t= LCcusp["C"] * L0 / (C1 *  LCcusp["L"] +  LCcusp["C"] * (L0 - L1));,
+    (*else*)
+        (*Upper half*)
+        (*First intersect with triangle*)
+        t = LCcusp["C"] * (L0 - 1.) / (C1 * (LCcusp["L"] - 1.) + LCcusp["C"] * (L0 - L1));
+        
+        (*Then one step Halley's method*)
+        Block[{dL,dC,kl,km,ks,ldt,mdt,sdt},
+            dL = L1 - L0;
+            dC = C1;
+
+            kl = +0.3963377774 * a + 0.2158037573 * b;
+            km = -0.1055613458 * a - 0.0638541728 * b;
+            ks = -0.0894841775 * a - 1.2914855480 * b;
+
+            ldt = dL + dC * kl;
+            mdt = dL + dC * km;
+            sdt = dL + dC * ks;
+            (* If higher accuracy is required, 2 or 3 iterations of the following block can be used:*)
+            Block[{LCl,LCc,l,m,s,ldt1,mdt1,sdt1,ldt2,mdt2,sdt2,r,r1,r2,ur,tr,g,g1,g2,ug,tg,b0,b1,b2,ub,tb},
+                LCl = L0 * (1. - t) + t * L1;
+                LCc = t * C1;
+
+                l = LCl + LCc * kl;
+                m = LCl + LCc * km;
+                s = LCl + LCc * ks;
+
+                ldt1 = 3 * ldt * l * l;
+                mdt1 = 3 * mdt * m * m;
+                sdt1 = 3 * sdt * s * s;
+
+                ldt2 = 6 * ldt * ldt * l;
+                mdt2 = 6 * mdt * mdt * m;
+                sdt2 = 6 * sdt * sdt * s;
+                
+                l=l^3;
+                m=m^3;
+                s=s^3;
+                
+                r = 4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s - 1;
+                r1 = 4.0767416621 * ldt1 - 3.3077115913 * mdt1 + 0.2309699292 * sdt1;
+                r2 = 4.0767416621 * ldt2 - 3.3077115913 * mdt2 + 0.2309699292 * sdt2;
+
+                ur = r1 / (r1 * r1 - 0.5 * r * r2);
+                tr = -r * ur;
+
+                g = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s - 1;
+                g1 = -1.2684380046 * ldt1 + 2.6097574011 * mdt1 - 0.3413193965 * sdt1;
+                g2 = -1.2684380046 * ldt2 + 2.6097574011 * mdt2 - 0.3413193965 * sdt2;
+
+                ug = g1 / (g1 * g1 - 0.5 * g * g2);
+                tg = -g * ug;
+
+                b0 = -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s - 1;
+                b1 = -0.0041960863 * ldt1 - 0.7034186147 * mdt1 + 1.7076147010 * sdt1;
+                b2 = -0.0041960863 * ldt2 - 0.7034186147 * mdt2 + 1.7076147010 * sdt2;
+
+                ub = b1 / (b1 * b1 - 0.5 * b0 * b2);
+                tb = -b0 * ub;
+
+                tr = If[ur >= 0, tr , 3.402823*10^38];
+                tg = If[ug >= 0, tg , 3.402823*10^38];
+                tb = If[ub >= 0, tb , 3.402823*10^38];
+                t += Min[tr,tg, tb];                            
+            ];
+        ];  
+    ];
+    Return[t]
+]
+findGamutIntersection[a_,b_,L1_,C1_,L0_]:=Module[{LCcusp},
+    (*Find the cusp of the gamut triangle*)
+    LCcusp=findCusp[a,b];
+    findGamutIntersection[a,b,L1,C1,L0,LCcusp]
+]
+
+HSL[h_,s_,l_]:=HSL[<|"h"->h,"s"->s,"l"->l|>]
+HSL[asoc_Association][s_String]:=asoc[s]
+
+ST[s_,t_]:=ST[<|"S"->s,"T"->t|>]
+ST[asoc_Association][s_String]:=asoc[s]
+
+toe[x_]:=With[{k1=0.206,k2=0.03},With[{k3=(1.+k1)/(1.+k2)},
+    0.5 * (k3 * x - k1 + Sqrt[(k3 * x - k1) * (k3 * x - k1) + 4 * k2 * k3 * x])
+]]
+
+toeInv[x_]:=With[{k1=0.206,k2=0.03},With[{k3=(1.+k1)/(1.+k2)},
+    (x * x + k1 * x) / (k3 * (x + k2))
+]]
+
+toST[cusp_LC]:=With[{l=cusp["L"],c=cusp["C"]},ST[c/l,c/(1.-l)]]
+getSTmid[a_,b_]:=With[{
+    s=0.11516993 + 1. / (
+        +7.44778970 + 4.15901240 * b
+        + a * (-2.19557347 + 1.75198401 * b
+            + a * (-2.13704948 - 10.02301043 * b
+                + a * (-4.24894561 + 5.38770819 * b + 4.69891013 * a
+                    )))
+        ),t=0.11239642 + 1. / (
+        +1.61320320 - 0.68124379 * b
+        + a * (+0.40370612 + 0.90148123 * b
+            + a * (-0.27087943 + 0.61223990 * b
+                + a * (+0.00299215 - 0.45399568 * b - 0.14661872 * a
+                    )))
+        )},
+    ST[s,t]
+]
+
+CS[c0_,cMid_,cMax_]:=CS[<|"c0"->c0,"cMid"->cMid,"cMax"->cMax|>]
+CS[asoc_Association][s_String]:=asoc[s]
+getCS[l_,a_,b_]:=Module[{LCcusp,STmax,k,c0,cMid,cMax},
+    LCcusp=findCusp[a,b];
+    cMax=findGamutIntersection[a,b,l,1.,l,LCcusp];
+    STmax=toST[LCcusp];
+    
+    (*Scale factor to compensate for the curved part of gamut shape:*)
+    k= cMax / Min[(l * STmax["S"]), (1 - l) * STmax["T"]];
+    
+    Block[{STmid,ca,cb},
+        STmid=getSTmid[a,b];
+        ca=l*STmid["S"];
+        cb=(1-l)*STmid["T"];
+        (*Use a soft minimum function, instead of a sharp triangle shape to get a smooth value for chroma.*)
+        cMid=0.9 * k * Sqrt[Sqrt[1. / (1. / ca^4 + 1. / cb^4)]];
+    ];
+    
+    Block[{ca,cb},
+        (*for C_0, the shape is independent of hue, so ST are constant. Values picked to roughly be the average values of ST.*)
+        ca = l * 0.4;
+        cb = (1. - l) * 0.8;
+
+        (*Use a soft minimum function, instead of a sharp triangle shape to get a smooth value for chroma.*)
+        c0 = Sqrt[1. / (1. / ca^2 + 1. / cb^2)];
+    ];
+    Return[CS[c0,cMid,cMax]]
+]
+
+sRGBtransferFunction[a_]:=If[0.0031308>=a,12.92*a,1.055*(a^.4166666666666667)-0.055]
+sRGBtransferFunctionInverse[a_]:=If[0.04045<a,((a+0.055)/1.055)^2.4,a/12.92]
+
+OkhsltosRGB[hsl_HSL]:=Module[{h,s,l,a,b,cs,c0,cMid,cMax},
+    h=hsl["h"];
+    s=hsl["s"];
+    l=hsl["l"];
+    
+    If[l == 1.0,
+        Return[RGB[1., 1., 1.]];
+    ];
+    If[l == 0., 
+        Return[RGB[0., 0., 0.]];
+    ];
+    
+    a = Cos[2.* Pi * h];
+    b = Sin[2.* Pi * h];
+    l = toeInv[l];
+    
+    cs = getCS[l, a, b];
+    c0 = cs["c0"];
+    cMid = cs["cMid"];
+    cMax = cs["cMax"];
+    Block[{mid,midInv,c,t,k0,k1,k2,rgb},
+        mid = 0.8;
+        midInv = 1.25;
+        If[s<mid,
+            t = midInv * s;
+
+            k1 = mid * c0;
+            k2 = (1. - k1 / cMid);
+
+            c = t * k1 / (1. - k2 * t);,
+        (*else*)
+            t = (s - mid)/ (1 - mid);
+
+            k0 = cMid;
+            k1 = (1. - mid) * cMid * cMid * midInv * midInv / c0;
+            k2 = (1. - (k1) / (cMax - cMid));
+
+            c = k0 + t * k1 / (1. - k2 * t);
+        ];
+        rgb=OKLABtolinearsRGB[Lab[l,c*a,c*b]];
+        Return[RGB[
+            sRGBtransferFunction[rgb["r"]],
+            sRGBtransferFunction[rgb["g"]],
+            sRGBtransferFunction[rgb["b"]]
+        ]];
+    ];
+]
+
+ArcTan2[y_,x_]:=Piecewise[{{ArcTan[y/x],x>0},{ArcTan[y/x]+Pi,x<0&&y>=0},{ArcTan[y/x]-Pi,x<0&&y<0},{Pi/2,x<$MachineEpsilon&&y>0},{-Pi/2,x<$MachineEpsilon&&y<0},{Undefined,True}}]
+sRGBtoOkhsl[rgb_RGB]:=Module[{lab,c,a,b,l,h,cs,c0,cMid,cMax},
+    lab=linearsRGBtoOKLAB[RGB[
+            sRGBtransferFunctionInverse[rgb["r"]],
+            sRGBtransferFunctionInverse[rgb["g"]],
+            sRGBtransferFunctionInverse[rgb["b"]]
+    ]];
+    c = Sqrt[lab["a"] * lab["a"] + lab["b"] * lab["b"]];
+    a = lab["a"]/ c;
+    b = lab["b"]/ c;
+    
+    l=lab["L"];
+    h = 0.5 + 0.5 * ArcTan2[-lab["b"], -lab["a"]] / Pi;
+
+    cs = getCS[l, a, b];
+    c0 = cs["c0"];
+    cMid = cs["cMid"];
+    cMax = cs["cMax"];
+    
+    (*Inverse of the interpolation in okhsl_to_srgb:*)
+    Block[{mid,midInv,t,s,k0,k1,k2,hsl},
+        mid = 0.8;
+        midInv = 1.25;
+        If[c < cMid,
+            k1 = mid * c0;
+            k2 = (1. - k1 / cMid);
+
+            t = c / (k1 + k2 * c);
+            s = t * mid;,
+        (*else*)
+            k0 = cMid;
+            k1 = (1. - mid) * cMid * cMid * midInv * midInv / c0;
+            k2 = (1. - (k1) / (cMax - cMid));
+
+            t = (c - k0) / (k1 + k2 * (c - k0));
+            s = mid + (1. - mid) * t;
+        ];
+
+        Return[HSL[h,s,toe[l]]];
+    ];
+]
+
+kw = 20.;
+list1 = #2 & @@@ ColorConvert[#, "LCH"] & /@ (Table[
+     OkhsltosRGB[HSL[b, 1, a]] // ToColor, {a, 0, 1, 1./kw}, {b, 0, 1,
+       1./kw}]);
+lp3d = ListPlot3D[{list1}, Mesh -> None, Axes -> False, 
+   Boxed -> False, 
+   ColorFunction -> (Glow@ToColor[OkhsltosRGB[HSL[#, 1, #2]] ] & ), 
+   ViewPoint -> {0, 0, Pi}, ViewVertical -> {0, 1, 0}, 
+   BoundaryStyle -> None];
+complex = 
+  GraphicsComplex[{#/kw - 1/kw, #2/kw - 1/kw, #3} & @@@ 
+    lp3d[[1, 1, 1]], lp3d[[1, 1, 2, 1, 1, 3]]];
+Show[DiscretizeGraphics@
+  Polygon[First@
+    Partition[
+     SortBy[MeshCoordinates@DiscretizeGraphics@complex, First], 
+     Round[kw] + 1]], 
+ DiscretizeGraphics@
+  Polygon[Last@
+    Partition[
+     SortBy[MeshCoordinates@DiscretizeGraphics@complex, First], 
+     Round[kw] + 1]], DiscretizeGraphics@complex, 
+ DiscretizeGraphics@
+  Polygon@{{0, 0, 0}, {1, 0, 0}, {1, 1, 0}, {0, 1, 0}}, Axes -> False,
+  Boxed -> False, BoxRatios -> {1, 1, 1/2}]
