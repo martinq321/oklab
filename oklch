@@ -190,7 +190,7 @@ Return[HSL[h,s,toe[l]]];];]
 (*---*)
 
 oksection[frac_]:=With[{smth=.02},ArrayPlot[Flatten/@Thread[{Reverse/@Reverse@Table[OkhsltosRGB[HSL[Mod[frac+.5,1],c,l]]//ToColor,{l,0,1,smth},{c,0,1,smth}],Reverse@Table[OkhsltosRGB[HSL[frac,c,l]]//ToColor,{l,0,1,smth},{c,0,1,smth}]}],ImageSize->300,Frame->False]];
-okc[kw_,chrom_,pow_]:=Module[{},list1=#2&@@@ColorConvert[#,"LCH"]&/@(Table[OkhsltosRGB[HSL[b,1,a]]//ToColor,{a,0,1,1./kw},{b,0,1,1./kw}]);
+okc[kw_,chrom_,mult_,pow_]:=Module[{},list1=#2&@@@ColorConvert[#,"LCH"]&/@(Table[OkhsltosRGB[HSL[b,1,a]]//ToColor,{a,0,1,1./kw},{b,0,1,1./kw}]);
 lp3d=ListPlot3D[{list1},Mesh->None,Axes->False,Boxed->False,ColorFunction->(Glow@ToColor[OkhsltosRGB[HSL[#,1,#2]] ]& ), ViewPoint -> {0, 0, Pi}, ViewVertical -> {0, 1, 0},BoundaryStyle->None];
 q=N@Chop@{#/kw-1/kw,#2/kw-1/kw,#3}&@@@lp3d[[1,1,1]];
 r=N@{{0,0,0},{1,0,0},{1,1,0},{0,1,0}};
@@ -198,10 +198,11 @@ poly=Flatten[{lp3d[[1,1,2,1,1,3,1,1,1]],{Range[1,(Round[kw]+1)^2,Round[kw]+1],Ra
 {a,b,c}={{0,0,chrom},{1,1,chrom},{1,0,chrom}};
 rp3d=RegionPlot3D[MeshRegion[q,Polygon@poly],Axes->False,Boxed->False,ColorFunction->(Glow@ToColor[OkhsltosRGB[HSL[#,1,#2]] ]& ), Mesh->{{0}},MeshFunctions->Function[{x,y,z},({x,y,z}-a).Cross[b-a,c-a]],ViewPoint -> {0, 0, Pi}, ViewVertical -> {0, 1, 0},BoundaryStyle->None,BoxRatios->{1.5,1,1/2}];
 qr=(Rest[rp3d[[##]]]&@@@(Most/@Most/@Rest@Position[rp3d,GrayLevel]))[[1]];
-c1=RegionPlot[Evaluate[DiscretizeRegion/@Polygon/@Select[(Most/@Part[rp3d[[1,1,1]],#]&/@(#[[1]]&/@qr)),Length@#>10&]],ColorFunction->(ToColor[OkhsltosRGB[HSL[#,chrom^(pow),#2]] ]& ),ColorFunctionScaling->False,AspectRatio->aspratio, MaxRecursion->0,PlotPoints->200,PerformanceGoal->"Quality",BoundaryStyle->None,Axes->False,Frame->False]];
-okc[kw_,chrom_]:=okc[kw,chrom,1/3];
+c1=RegionPlot[Evaluate[DiscretizeRegion/@Polygon/@Select[(Most/@Part[rp3d[[1,1,1]],#]&/@(#[[1]]&/@qr)),Length@#>10&]],ColorFunction->(ToColor[OkhsltosRGB[HSL[#,If[#>1,1,#]&[mult*chrom^(pow)],#2]] ]& ),ColorFunctionScaling->False,AspectRatio->aspratio, MaxRecursion->0,PlotPoints->200,PerformanceGoal->"Quality",BoundaryStyle->None,Axes->False,Frame->False]];
+okc[kw_,chrom_,pow_]:=okc[kw,chrom,1,pow];
+okc[kw_,chrom_]:=okc[kw,chrom,1,1(*1/3*)];
 
-okl[kw_,light_,pow_]:=Module[{},list1=#2&@@@ColorConvert[#,"LCH"]&/@(Table[OkhsltosRGB[HSL[b,1,a]]//ToColor,{a,0,1,1./kw},{b,0,1,1./kw}]);
+okl[kw_,light_,mult_,pow_]:=Module[{},list1=#2&@@@ColorConvert[#,"LCH"]&/@(Table[OkhsltosRGB[HSL[b,1,a]]//ToColor,{a,0,1,1./kw},{b,0,1,1./kw}]);
 lp3d=ListPlot3D[{list1},Mesh->None,Axes->False,Boxed->False,ColorFunction->(Glow@ToColor[OkhsltosRGB[HSL[#,1,#2]] ]& ), ViewPoint -> {0, 0, Pi}, ViewVertical -> {0, 1, 0},BoundaryStyle->None];
 q=N@Chop@{#/kw-1/kw,#2/kw-1/kw,#3}&@@@lp3d[[1,1,1]];
 r=N@{{0,0,0},{1,0,0},{1,1,0},{0,1,0}};
@@ -209,10 +210,11 @@ poly=Flatten[{lp3d[[1,1,2,1,1,3,1,1,1]],{Range[1,(Round[kw]+1)^2,Round[kw]+1],Ra
 {a,b,c}={{0,light,0},{1,light,0},{0,light,1}};
 rp3d=RegionPlot3D[MeshRegion[q,Polygon@poly],Axes->False,Boxed->False,ColorFunction->(Glow@ToColor[OkhsltosRGB[HSL[#,1,#2]] ]& ), Mesh->{{0}},MeshFunctions->Function[{x,y,z},({x,y,z}-a).Cross[b-a,c-a]],ViewPoint -> {0, 0, Pi}, ViewVertical -> {0, 1, 0},BoundaryStyle->None,BoxRatios->{1.5,1,1/2}];
 qr=((Rest[rp3d[[##]]]&@@@(Most/@Most/@Rest@Position[rp3d,GrayLevel]))[[1]]);
-l1=RegionPlot[Evaluate[DiscretizeRegion/@Polygon/@(Join[#,{{1,0}}]&/@Select[{#,#3}&@@@Part[rp3d[[1,1,1]],#]&/@(#[[1]]&/@qr),Length@#>10&])],ColorFunction->(ToColor[OkhsltosRGB[HSL[#,#2^(pow),light]] ]& ),ColorFunctionScaling->False,AspectRatio->aspratio, MaxRecursion->0,PlotPoints->200,PerformanceGoal->"Quality",BoundaryStyle->None,Axes->False,Frame->False]];
-okl[kw_,light_]:=okl[kw,light,1/3];
+l1=RegionPlot[Evaluate[DiscretizeRegion/@Polygon/@(Join[#,{{1,0}}]&/@Select[{#,#3}&@@@Part[rp3d[[1,1,1]],#]&/@(#[[1]]&/@qr),Length@#>10&])],ColorFunction->(ToColor[OkhsltosRGB[HSL[#,If[#>1,1,#]&[mult*#2^(pow)],light]] ]& ),ColorFunctionScaling->False,AspectRatio->aspratio, MaxRecursion->0,PlotPoints->200,PerformanceGoal->"Quality",BoundaryStyle->None,Axes->False,Frame->False]];
+okl[kw_,light_,pow_]:=okl[kw,light,1,pow];
+okl[kw_,light_]:=okl[kw,light,1,1(*1/3*)];
 
-okh[kw_,hue_,pow_]:=Module[{},list1=#2&@@@ColorConvert[#,"LCH"]&/@(Table[OkhsltosRGB[HSL[b,1,a]]//ToColor,{a,0,1,1./kw},{b,0,1,1./kw}]);
+okh[kw_,hue_,mult_,pow_]:=Module[{},list1=#2&@@@ColorConvert[#,"LCH"]&/@(Table[OkhsltosRGB[HSL[b,1,a]]//ToColor,{a,0,1,1./kw},{b,0,1,1./kw}]);
 lp3d=ListPlot3D[{list1},Mesh->None,Axes->False,Boxed->False,ColorFunction->(Glow@ToColor[OkhsltosRGB[HSL[#,1,#2]] ]& ), ViewPoint -> {0, 0, Pi}, ViewVertical -> {0, 1, 0},BoundaryStyle->None];
 q=N@Chop@{#/kw-1/kw,#2/kw-1/kw,#3}&@@@lp3d[[1,1,1]];
 r=N@{{0,0,0},{1,0,0},{1,1,0},{0,1,0}};
@@ -221,13 +223,14 @@ poly=Flatten[{lp3d[[1,1,2,1,1,3,1,1,1]],{Range[1,(Round[kw]+1)^2,Round[kw]+1],Ra
 rp3d=RegionPlot3D[MeshRegion[q,Polygon@poly],Axes->False,Boxed->False,ColorFunction->(Glow@ToColor[OkhsltosRGB[HSL[#,1,#2]] ]& ), Mesh->{{0}},MeshFunctions->Function[{x,y,z},({x,y,z}-a).Cross[b-a,c-a]],ViewPoint -> {0, 0, Pi}, ViewVertical -> {0, 1, 0},BoundaryStyle->None,BoxRatios->{1.5,1,1/2}];
 qr=(Rest[rp3d[[##]]]&@@@(Most/@Most/@Rest@Position[rp3d,GrayLevel]))[[1]];
 h1=
-RegionPlot[Evaluate[DiscretizeRegion/@Polygon/@Select[{#2,#3}&@@@Part[rp3d[[1,1,1]],#]&/@(#[[1]]&/@qr),Length@#>10&]],Mesh->None,ColorFunction->(ToColor[OkhsltosRGB[HSL[hue,#2^(pow),#]] ]& ),ColorFunctionScaling->False,AspectRatio->aspratio, MaxRecursion->0,PlotPoints->200,PerformanceGoal->"Quality",BoundaryStyle->None,Axes->False,Frame->False]];
-okh[kw_,hue_]:=okh[kw,hue,1/3];
+RegionPlot[Evaluate[DiscretizeRegion/@Polygon/@Select[{#2,#3}&@@@Part[rp3d[[1,1,1]],#]&/@(#[[1]]&/@qr),Length@#>10&]],Mesh->None,ColorFunction->(ToColor[OkhsltosRGB[HSL[hue,If[#>1,1,#]&[mult*#2^(pow)],#]] ]& ),ColorFunctionScaling->False,AspectRatio->aspratio, MaxRecursion->0,PlotPoints->200,PerformanceGoal->"Quality",BoundaryStyle->None,Axes->False,Frame->False]];
+okh[kw_,hue_,pow_]:=okh[kw,hue,1,pow];
+okh[kw_,hue_]:=okh[kw,hue,1,1(*1/3*)];
 (*should always go to saturation 1*)
 (*https://lch.oklch.com/#65.67,60.85,249.89,100*)
 (*
 kw=100.;light=.685;chrom=.5112;hue=N[249/360];aspratio=1/3;
-{okh[kw,hue,1/3],okl[kw,light,1/3],okc[kw,chrom,1/3]};
+{okh[kw,hue,1.5,1],okl[kw,light,1.5,1],okc[kw,chrom,1.5,1]};
 GraphicsGrid[Partition[{h1,l1,rp3d,c1},2],ImageSize->800]
 *)
 
